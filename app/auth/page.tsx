@@ -2,8 +2,7 @@
 
 import { useState } from "react";
 import { useRouter } from "next/navigation";
-import { account } from "@/lib/appwrite";
-import { ID } from "appwrite";
+import { login, signUp } from "@/lib/auth";
 import Link from "next/link";
 import { MapPin, Mail, Lock, User } from "lucide-react";
 import { toast } from "sonner";
@@ -22,17 +21,22 @@ export default function AuthPage() {
 
     try {
       if (isLogin) {
-        // Login
-        await account.createEmailPasswordSession(email, password);
+        const result = await login(email, password);
+        if (!result.success) {
+          toast.error(result.error || "Authentication failed");
+          return;
+        }
         toast.success("Welcome back!");
-        router.push("/issues");
       } else {
-        // Sign up
-        await account.create(ID.unique(), email, password, name);
-        await account.createEmailPasswordSession(email, password);
+        const result = await signUp(email, password, name);
+        if (!result.success) {
+          toast.error(result.error || "Authentication failed");
+          return;
+        }
         toast.success("Account created successfully!");
-        router.push("/issues");
       }
+      router.push("/issues");
+      router.refresh();
     } catch (error: any) {
       toast.error(error.message || "Authentication failed");
     } finally {

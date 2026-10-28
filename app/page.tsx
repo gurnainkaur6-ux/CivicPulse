@@ -32,7 +32,7 @@ export default function HomePage() {
             Your Voice for a Better Neighborhood
           </h2>
           <p className="text-xl text-gray-600 dark:text-gray-300 mb-8">
-            Report potholes, water problems, power outages, and more. See what's happening around you in real-time.
+            Report potholes, water problems, power outages, and more. See what&apos;s happening around you in real-time.
           </p>
           <div className="flex gap-4 justify-center">
             <Link

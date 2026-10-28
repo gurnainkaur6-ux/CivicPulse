@@ -1,54 +1,57 @@
 import { NextRequest, NextResponse } from "next/server";
-import { getPostgresPool } from "@/lib/postgres";
+import { getSessionUser } from "@/lib/auth-server";
 import { withRateLimit, getRateLimitIdentifier } from "@/lib/rate-limit-simple";
 import { validateFindSimilar } from "@/lib/validation-simple";
-import { optionalAuth } from "@/lib/auth-simple";
+import { haversineMeters, scanIssues, textSimilarity } from "@/lib/issues-service";
+import { handleRouteError, jsonError } from "@/lib/api-response";
+import type { IssueCategory, SimilarIssue } from "@/types";
 
+const MIN_SIMILARITY = 0.2;
+const MAX_RESULTS = 5;
+
+// POST /api/issues/similar — duplicate detection while reporting (public)
 export async function POST(request: NextRequest) {
   try {
-    // 1. Optional auth (public endpoint but track for rate limiting)
-    const user = await optionalAuth(request);
+    const user = await getSessionUser(request);
 
-    // 2. Rate limiting (20 requests per minute - expensive query)
-    const rateLimitResponse = await withRateLimit(
+    const rateLimited = await withRateLimit(
       request,
-      getRateLimitIdentifier(request, user?.userId),
+      getRateLimitIdentifier(request, user?.id),
       { interval: 60000, maxRequests: 20 }
     );
-    if (rateLimitResponse) return rateLimitResponse;
+    if (rateLimited) return rateLimited;
 
-    // 3. Validate request body
-    const body = await request.json();
+    const body = await request.json().catch(() => null);
     const validation = validateFindSimilar(body);
-    
-    if (!validation.success) {
-      return NextResponse.json({ error: validation.error }, { status: 400 });
+    if (!validation.success || !validation.data) {
+      return jsonError(validation.error || "Invalid request", 400);
     }
 
-    const { title, description, latitude, longitude, category, radius_km } = validation.data!;
+    const { title, description, latitude, longitude, category, radius_km } = validation.data;
 
-    const pgPool = getPostgresPool();
+    const origin = { latitude, longitude };
     const radiusMeters = radius_km * 1000;
+    const query = `${title} ${description}`;
 
-    const result = await pgPool.query(
-      `SELECT * FROM find_similar_issues($1, $2, $3, $4, $5, $6, 0.3)`,
-      [title, description, latitude, longitude, category, radiusMeters]
-    );
+    const candidates = await scanIssues({ category: category as IssueCategory }, 300);
 
-    return NextResponse.json({
-      success: true,
-      similar_issues: result.rows.map((row) => ({
-        ...row,
-        // Round coordinates for privacy
-        latitude: Math.round(row.latitude * 1000) / 1000,
-        longitude: Math.round(row.longitude * 1000) / 1000,
-      })),
-    });
+    const similar: SimilarIssue[] = candidates
+      .map((issue) => ({
+        ...issue,
+        distance_meters: Math.round(haversineMeters(origin, issue)),
+        similarity_score:
+          Math.round(textSimilarity(query, `${issue.title} ${issue.description}`) * 100) / 100,
+      }))
+      .filter(
+        (issue) =>
+          (issue.distance_meters ?? Number.POSITIVE_INFINITY) <= radiusMeters &&
+          issue.similarity_score >= MIN_SIMILARITY
+      )
+      .sort((a, b) => b.similarity_score - a.similarity_score)
+      .slice(0, MAX_RESULTS);
+
+    return NextResponse.json({ success: true, similar_issues: similar });
   } catch (error) {
-    console.error("Find similar issues error:", error);
-    return NextResponse.json(
-      { error: "Failed to find similar issues" },
-      { status: 500 }
-    );
+    return handleRouteError("issues:similar", error);
   }
 }

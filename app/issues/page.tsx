@@ -24,7 +24,7 @@ export default function IssuesPage() {
     // Get user location
     getCurrentLocation()
       .then((loc) => {
-        setLocation(loc);
+        setLocation({ lat: loc.latitude, lng: loc.longitude });
         fetchIssues(loc.latitude, loc.longitude);
       })
       .catch(() => {

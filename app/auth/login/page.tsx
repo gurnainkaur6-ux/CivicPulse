@@ -28,7 +28,12 @@ export default function LoginPage() {
     const result = await login(formData.email, formData.password);
 
     if (result.success) {
-      router.push('/');
+      const redirect = new URLSearchParams(window.location.search).get('redirect');
+      // Only allow same-site paths to avoid open redirects.
+      const target = redirect && redirect.startsWith('/') && !redirect.startsWith('//')
+        ? redirect
+        : '/';
+      router.push(target);
       router.refresh();
     } else {
       setError(result.error || 'Login failed');
@@ -103,7 +108,7 @@ export default function LoginPage() {
 
           <div className="text-center">
             <Link href="/auth/signup" className="text-sm text-blue-600 hover:text-blue-500">
-              Don't have an account? Sign up
+              Don&apos;t have an account? Sign up
             </Link>
           </div>
         </form>

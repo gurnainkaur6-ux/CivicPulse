@@ -1,10 +1,17 @@
-import { getAppwriteAccount, ID } from './appwrite-client';
-import { AppwriteException } from 'appwrite';
+/**
+ * Browser-side auth helpers.
+ *
+ * All calls go through this app's own `/api/auth/*` routes: the server creates
+ * the Appwrite session and stores the secret in an HttpOnly cookie, so every
+ * later request to our API routes is authenticated automatically.
+ */
 
 export interface User {
-  $id: string;
+  id: string;
   email: string;
   name: string;
+  labels?: string[];
+  isAdmin?: boolean;
 }
 
 export interface AuthResponse {
@@ -13,114 +20,69 @@ export interface AuthResponse {
   error?: string;
 }
 
-/**
- * Sign up a new user
- */
+async function postJson(url: string, body: unknown): Promise<Response> {
+  return fetch(url, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(body),
+  });
+}
+
+async function readError(response: Response, fallback: string): Promise<string> {
+  const data = await response.json().catch(() => null);
+  return (data && typeof data.error === "string" && data.error) || fallback;
+}
+
 export async function signUp(
   email: string,
   password: string,
   name: string
 ): Promise<AuthResponse> {
   try {
-    const account = getAppwriteAccount();
-    
-    // Create account
-    const user = await account.create(
-      ID.unique(),
-      email,
-      password,
-      name
-    );
+    const response = await postJson("/api/auth/signup", { email, password, name });
+    const data = await response.json().catch(() => null);
 
-    // Automatically log in after signup
-    await account.createEmailPasswordSession(email, password);
-
-    return {
-      success: true,
-      user: {
-        $id: user.$id,
-        email: user.email,
-        name: user.name
-      }
-    };
-  } catch (error) {
-    console.error('Signup error:', error);
-    return {
-      success: false,
-      error: error instanceof AppwriteException 
-        ? error.message 
-        : 'Failed to create account'
-    };
+    if (!response.ok || !data?.success) {
+      return { success: false, error: await readError(response, "Failed to create account") };
+    }
+    return { success: true, user: data.user };
+  } catch {
+    return { success: false, error: "Failed to create account" };
   }
 }
 
-/**
- * Log in an existing user
- */
-export async function login(
-  email: string,
-  password: string
-): Promise<AuthResponse> {
+export async function login(email: string, password: string): Promise<AuthResponse> {
   try {
-    const account = getAppwriteAccount();
-    
-    await account.createEmailPasswordSession(email, password);
-    
-    const user = await account.get();
+    const response = await postJson("/api/auth/login", { email, password });
+    const data = await response.json().catch(() => null);
 
-    return {
-      success: true,
-      user: {
-        $id: user.$id,
-        email: user.email,
-        name: user.name
-      }
-    };
-  } catch (error) {
-    console.error('Login error:', error);
-    return {
-      success: false,
-      error: error instanceof AppwriteException 
-        ? error.message 
-        : 'Invalid email or password'
-    };
+    if (!response.ok || !data?.success) {
+      return { success: false, error: await readError(response, "Invalid email or password") };
+    }
+    return { success: true, user: data.user };
+  } catch {
+    return { success: false, error: "Invalid email or password" };
   }
 }
 
-/**
- * Log out current user
- */
 export async function logout(): Promise<void> {
   try {
-    const account = getAppwriteAccount();
-    await account.deleteSession('current');
-  } catch (error) {
-    console.error('Logout error:', error);
+    await fetch("/api/auth/logout", { method: "POST" });
+  } catch {
+    // Nothing to recover from — the cookie is cleared on the next login.
   }
 }
 
-/**
- * Get current logged-in user
- */
 export async function getCurrentUser(): Promise<User | null> {
   try {
-    const account = getAppwriteAccount();
-    const user = await account.get();
-    
-    return {
-      $id: user.$id,
-      email: user.email,
-      name: user.name
-    };
-  } catch (error) {
+    const response = await fetch("/api/auth/session", { cache: "no-store" });
+    const data = await response.json().catch(() => null);
+    return data?.user ?? null;
+  } catch {
     return null;
   }
 }
 
-/**
- * Check if user is authenticated
- */
 export async function isAuthenticated(): Promise<boolean> {
-  const user = await getCurrentUser();
-  return user !== null;
+  return (await getCurrentUser()) !== null;
 }

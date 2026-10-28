@@ -1,68 +1,84 @@
 import { NextRequest, NextResponse } from "next/server";
-import { getPostgresPool } from "@/lib/postgres";
+import { getSessionUser } from "@/lib/auth-server";
 import { withRateLimit, getRateLimitIdentifier } from "@/lib/rate-limit-simple";
 import { validateNearbyIssues } from "@/lib/validation-simple";
-import { optionalAuth } from "@/lib/auth-simple";
+import { haversineMeters, scanIssues } from "@/lib/issues-service";
+import { handleRouteError, jsonError } from "@/lib/api-response";
+import type { Issue, IssueCategory, IssueStatus } from "@/types";
 
+// GET /api/issues/nearby — radius feed (public)
+//
+// TablesDB has no geospatial query, so candidate rows are scanned and filtered
+// with a haversine distance in process. Fine for town-scale volumes.
 export async function GET(request: NextRequest) {
   try {
-    // 1. Optional auth (public endpoint but track user for rate limiting)
-    const user = await optionalAuth(request);
+    const user = await getSessionUser(request);
 
-    // 2. Rate limiting (100 requests per minute per IP/user)
-    const rateLimitResponse = await withRateLimit(
+    const rateLimited = await withRateLimit(
       request,
-      getRateLimitIdentifier(request, user?.userId),
+      getRateLimitIdentifier(request, user?.id),
       { interval: 60000, maxRequests: 100 }
     );
-    if (rateLimitResponse) return rateLimitResponse;
+    if (rateLimited) return rateLimited;
 
-    // 3. Parse and validate query parameters
     const { searchParams } = new URL(request.url);
-
-    const queryData = {
-      latitude: parseFloat(searchParams.get("latitude") || ""),
-      longitude: parseFloat(searchParams.get("longitude") || ""),
-      radius_km: parseFloat(searchParams.get("radius_km") || "3"),
+    const validation = validateNearbyIssues({
+      latitude: Number.parseFloat(searchParams.get("latitude") || ""),
+      longitude: Number.parseFloat(searchParams.get("longitude") || ""),
+      radius_km: Number.parseFloat(searchParams.get("radius_km") || "3"),
       category: searchParams.get("category") || undefined,
       status: searchParams.get("status") || undefined,
       sort_by: searchParams.get("sort_by") || "recent",
-      limit: parseInt(searchParams.get("limit") || "50"),
-      offset: parseInt(searchParams.get("offset") || "0"),
-    };
+      limit: Number.parseInt(searchParams.get("limit") || "50", 10),
+      offset: Number.parseInt(searchParams.get("offset") || "0", 10),
+    });
 
-    const validation = validateNearbyIssues(queryData);
-    
-    if (!validation.success) {
-      return NextResponse.json({ error: validation.error }, { status: 400 });
+    if (!validation.success || !validation.data) {
+      return jsonError(validation.error || "Invalid query", 400);
     }
 
-    const { latitude, longitude, radius_km, category, status, sort_by, limit, offset } = validation.data!;
+    const { latitude, longitude, radius_km, category, status, sort_by, limit, offset } =
+      validation.data;
 
-    const pgPool = getPostgresPool();
+    const origin = { latitude, longitude };
     const radiusMeters = radius_km * 1000;
 
-    const result = await pgPool.query(
-      `SELECT * FROM find_nearby_issues($1, $2, $3, $4, $5, $6, $7, $8)`,
-      [latitude, longitude, radiusMeters, category, status, sort_by, limit, offset]
+    const candidates = await scanIssues(
+      {
+        category: category as IssueCategory | undefined,
+        status: status as IssueStatus | undefined,
+      },
+      300
     );
+
+    const nearby: Issue[] = candidates
+      .map((issue) => ({
+        ...issue,
+        distance_meters: Math.round(haversineMeters(origin, issue)),
+      }))
+      .filter((issue) => (issue.distance_meters ?? Number.POSITIVE_INFINITY) <= radiusMeters);
+
+    nearby.sort((a, b) => {
+      if (sort_by === "upvotes") return b.upvote_count - a.upvote_count;
+      if (sort_by === "distance") {
+        return (a.distance_meters ?? 0) - (b.distance_meters ?? 0);
+      }
+      return Date.parse(b.created_at) - Date.parse(a.created_at);
+    });
+
+    const page = nearby.slice(offset, offset + limit).map((issue) => ({
+      ...issue,
+      // ~100m precision for privacy
+      latitude: Math.round(issue.latitude * 1000) / 1000,
+      longitude: Math.round(issue.longitude * 1000) / 1000,
+    }));
 
     return NextResponse.json({
       success: true,
-      issues: result.rows.map((row) => ({
-        ...row,
-        // Round coordinates for privacy (±100m precision)
-        latitude: Math.round(row.latitude * 1000) / 1000,
-        longitude: Math.round(row.longitude * 1000) / 1000,
-        created_at: row.created_at.toISOString(),
-        updated_at: row.updated_at.toISOString(),
-      })),
+      issues: page,
+      total: nearby.length,
     });
   } catch (error) {
-    console.error("Nearby issues error:", error);
-    return NextResponse.json(
-      { error: "Failed to fetch nearby issues" },
-      { status: 500 }
-    );
+    return handleRouteError("issues:nearby", error);
   }
 }

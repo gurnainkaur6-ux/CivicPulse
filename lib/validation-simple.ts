@@ -22,8 +22,14 @@ export const VALID_CATEGORIES = [
 
 export const VALID_STATUSES = ["reported", "acknowledged", "in_progress", "resolved"] as const;
 
+export const VALID_PRIORITIES = ["low", "medium", "high", "urgent"] as const;
+
 export type IssueCategory = typeof VALID_CATEGORIES[number];
 export type IssueStatus = typeof VALID_STATUSES[number];
+export type IssuePriority = typeof VALID_PRIORITIES[number];
+
+/** TablesDB row IDs are 20-char alphanumerics; custom IDs may use `_` and `-`. */
+export const ROW_ID_PATTERN = /^[A-Za-z0-9][A-Za-z0-9._-]{0,35}$/;
 
 interface ValidationResult<T> {
   success: boolean;
@@ -39,6 +45,8 @@ export interface CreateIssueInput {
   title: string;
   description: string;
   photo_id?: string;
+  priority: string;
+  address?: string;
   latitude: number;
   longitude: number;
 }
@@ -83,6 +91,19 @@ export function validateCreateIssue(data: any): ValidationResult<CreateIssueInpu
     errors.push(`Longitude must be between ${INDIA_LNG_MIN} and ${INDIA_LNG_MAX}`);
   }
 
+  // Priority (optional, defaults to medium)
+  const priority = data.priority || "medium";
+  if (!VALID_PRIORITIES.includes(priority)) {
+    errors.push("Priority must be one of: low, medium, high, urgent");
+  }
+
+  // Optional location label
+  if (data.address !== undefined && typeof data.address !== "string") {
+    errors.push("Invalid address");
+  } else if (typeof data.address === "string" && data.address.length > 255) {
+    errors.push("Address must be less than 255 characters");
+  }
+
   if (errors.length > 0) {
     return { success: false, error: errors.join(", ") };
   }
@@ -94,6 +115,8 @@ export function validateCreateIssue(data: any): ValidationResult<CreateIssueInpu
       title: data.title.trim(),
       description: data.description.trim(),
       photo_id: data.photo_id,
+      priority,
+      address: data.address ? String(data.address).trim() : undefined,
       latitude: data.latitude,
       longitude: data.longitude,
     },
@@ -112,9 +135,8 @@ export function validateToggleUpvote(data: any): ValidationResult<ToggleUpvoteIn
     return { success: false, error: "issue_id is required" };
   }
 
-  // Basic UUID validation
-  const uuidRegex = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
-  if (!uuidRegex.test(data.issue_id)) {
+  // Basic row ID validation (Appwrite IDs are not UUIDs)
+  if (!ROW_ID_PATTERN.test(data.issue_id)) {
     return { success: false, error: "Invalid issue_id format" };
   }
 
@@ -132,7 +154,7 @@ export interface FindSimilarInput {
   description: string;
   latitude: number;
   longitude: number;
-  category: string;
+  category?: string;
   radius_km: number;
 }
 
@@ -147,7 +169,8 @@ export function validateFindSimilar(data: any): ValidationResult<FindSimilarInpu
     errors.push("Description must be between 1-2000 characters");
   }
 
-  if (!data.category || !VALID_CATEGORIES.includes(data.category)) {
+  // Category is only a narrowing hint for duplicate detection, not a requirement.
+  if (data.category !== undefined && data.category !== "" && !VALID_CATEGORIES.includes(data.category)) {
     errors.push("Invalid category");
   }
 
@@ -175,7 +198,7 @@ export function validateFindSimilar(data: any): ValidationResult<FindSimilarInpu
       description: data.description,
       latitude: data.latitude,
       longitude: data.longitude,
-      category: data.category,
+      category: data.category || undefined,
       radius_km,
     },
   };
@@ -220,8 +243,8 @@ export function validateNearbyIssues(data: any): ValidationResult<NearbyIssuesIn
   }
 
   const sort_by = data.sort_by || "recent";
-  if (!["upvotes", "recent"].includes(sort_by)) {
-    errors.push("sort_by must be 'upvotes' or 'recent'");
+  if (!["upvotes", "recent", "distance"].includes(sort_by)) {
+    errors.push("sort_by must be 'upvotes', 'recent' or 'distance'");
   }
 
   const limit = data.limit || 50;

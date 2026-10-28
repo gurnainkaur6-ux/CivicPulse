@@ -6,7 +6,7 @@ import { MapPin, AlertCircle, CheckCircle, Clock, TrendingUp, Users } from "luci
 import { Button } from "@/components/ui/button";
 
 interface DashboardStats {
-  total_issues: number;
+  total: number;
   reported: number;
   acknowledged: number;
   in_progress: number;
@@ -28,11 +28,16 @@ export default function AdminDashboard() {
     try {
       const response = await fetch("/api/admin/stats");
       const data = await response.json();
-      
+
+      if (response.status === 401 || response.status === 403) {
+        setError("Admin sign-in required. Sign in with an admin account, or add your email to ADMIN_EMAILS.");
+        return;
+      }
+
       if (data.success) {
         setStats(data.stats);
       } else {
-        setError(data.error);
+        setError(data.error || "Failed to load stats");
       }
     } catch (err) {
       setError("Failed to load stats");
@@ -63,7 +68,9 @@ export default function AdminDashboard() {
               <Link href="/">
                 <Button variant="ghost">Public Site</Button>
               </Link>
-              <Button variant="outline">Logout</Button>
+              <Link href="/auth/login?redirect=/admin">
+                <Button variant="outline">Sign in</Button>
+              </Link>
             </div>
           </div>
         </div>
@@ -87,7 +94,7 @@ export default function AdminDashboard() {
               <div>
                 <p className="text-sm text-gray-600 mb-1">Total Issues</p>
                 <p className="text-3xl font-bold text-gray-900">
-                  {stats?.total_issues || 0}
+                  {stats?.total || 0}
                 </p>
               </div>
               <TrendingUp className="w-10 h-10 text-blue-600" />

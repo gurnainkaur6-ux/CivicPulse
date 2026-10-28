@@ -26,6 +26,9 @@ yarn-error.log*
 .env
 .env*.local
 
+# editor / agent workspace metadata
+.qoder/
+
 # vercel
 .vercel
 

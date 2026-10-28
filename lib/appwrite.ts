@@ -1,32 +1,59 @@
-import { Client, Account, Databases, Storage } from "appwrite";
+import { Client, Account, TablesDB, Storage, ID, Query } from "appwrite";
 
 /**
- * Get environment variable or use fallback for demo mode
+ * Browser/shared Appwrite client.
+ *
+ * Every value below is read through a *static* `process.env.NEXT_PUBLIC_*`
+ * reference so Next.js can inline it into the client bundle. Dynamic access
+ * (`process.env[key]`) resolves to `undefined` in the browser.
  */
-function getClientEnv(key: string, fallback: string): string {
-  if (typeof window === "undefined") {
-    // Server-side: require the value
-    const value = process.env[key];
-    if (!value) {
-      console.warn(`[Appwrite] Missing environment variable: ${key}, using fallback: ${fallback}`);
-      return fallback;
+
+export const APPWRITE_ENDPOINT =
+  process.env.NEXT_PUBLIC_APPWRITE_ENDPOINT || "https://cloud.appwrite.io/v1";
+
+export const APPWRITE_PROJECT_ID = process.env.NEXT_PUBLIC_APPWRITE_PROJECT_ID || "";
+
+/** TablesDB database ID (legacy env name kept as a fallback). */
+export const DATABASE_ID =
+  process.env.NEXT_PUBLIC_APPWRITE_DATABASE_ID ||
+  process.env.NEXT_PUBLIC_APPWRITE_DOCUMENTS_DB_ID ||
+  "";
+
+/** TablesDB table IDs (legacy collection env names kept as fallbacks). */
+export const TABLE_IDS = {
+  ISSUES:
+    process.env.NEXT_PUBLIC_APPWRITE_ISSUES_TABLE_ID ||
+    process.env.NEXT_PUBLIC_APPWRITE_ISSUES_COLLECTION_ID ||
+    "issues",
+  UPVOTES: process.env.NEXT_PUBLIC_APPWRITE_UPVOTES_TABLE_ID || "upvotes",
+  STATUS_EVENTS: process.env.NEXT_PUBLIC_APPWRITE_STATUS_EVENTS_TABLE_ID || "status_events",
+} as const;
+
+export const BUCKET_ID = process.env.NEXT_PUBLIC_APPWRITE_STORAGE_BUCKET_ID || "";
+
+let client: Client | null = null;
+
+export function getClient(): Client {
+  if (!client) {
+    if (!APPWRITE_PROJECT_ID) {
+      console.warn("[Appwrite] NEXT_PUBLIC_APPWRITE_PROJECT_ID is not set");
     }
-    return value;
+    client = new Client().setEndpoint(APPWRITE_ENDPOINT).setProject(APPWRITE_PROJECT_ID);
   }
-  // Client-side: read from window or use fallback
-  return process.env[key] || fallback;
+  return client;
 }
 
-// Client SDK (browser-side)
-export const client = new Client()
-  .setEndpoint(getClientEnv("NEXT_PUBLIC_APPWRITE_ENDPOINT", "https://cloud.appwrite.io/v1"))
-  .setProject(getClientEnv("NEXT_PUBLIC_APPWRITE_PROJECT_ID", "demo-project"));
+export function getAccount(): Account {
+  return new Account(getClient());
+}
 
-export const account = new Account(client);
-export const databases = new Databases(client);
-export const storage = new Storage(client);
+/** TablesDB service: tables + rows (the current Appwrite Databases API). */
+export function getTablesDB(): TablesDB {
+  return new TablesDB(getClient());
+}
 
-// DocumentsDB Realtime collection IDs
-export const REALTIME_COLLECTION_ID = getClientEnv("NEXT_PUBLIC_APPWRITE_ISSUES_COLLECTION_ID", "demo-collection");
-export const DOCUMENTS_DB_ID = getClientEnv("NEXT_PUBLIC_APPWRITE_DOCUMENTS_DB_ID", "demo-db");
-export const STORAGE_BUCKET_ID = getClientEnv("NEXT_PUBLIC_APPWRITE_STORAGE_BUCKET_ID", "demo-bucket");
+export function getStorage(): Storage {
+  return new Storage(getClient());
+}
+
+export { ID, Query };

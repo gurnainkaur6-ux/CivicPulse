@@ -1,77 +1,52 @@
 import { NextRequest, NextResponse } from "next/server";
-import { getPostgresPool } from "@/lib/postgres";
-import { validateAuth } from "@/lib/auth-simple";
+import { Query } from "node-appwrite";
+import { requireAdmin } from "@/lib/auth-server";
+import { countIssues, listIssues } from "@/lib/issues-service";
+import { handleRouteError, jsonError } from "@/lib/api-response";
+import type { IssueCategory, IssueStatus } from "@/types";
 
+// GET /api/admin/issues — admin issue table with filters + pagination
 export async function GET(request: NextRequest) {
   try {
-    // Check admin authentication
-    let user;
-    try {
-      user = await validateAuth(request);
-      // TODO: Check if user.isAdmin === true
-    } catch (error) {
-      return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
-    }
+    await requireAdmin(request);
 
     const { searchParams } = new URL(request.url);
-    const status = searchParams.get("status");
-    const category = searchParams.get("category");
-    const search = searchParams.get("search");
-    const limit = parseInt(searchParams.get("limit") || "20");
-    const offset = parseInt(searchParams.get("offset") || "0");
+    const status = searchParams.get("status") || undefined;
+    const category = searchParams.get("category") || undefined;
+    const search = (searchParams.get("search") || "").trim().toLowerCase();
+    const limit = Math.min(Number(searchParams.get("limit") || 20), 100);
+    const offset = Math.max(Number(searchParams.get("offset") || 0), 0);
 
-    const pgPool = getPostgresPool();
-    
-    // Build query
-    let query = `
-      SELECT 
-        id, user_id, category, title, description, photo_id,
-        ST_Y(location::geometry) as latitude,
-        ST_X(location::geometry) as longitude,
-        status, upvote_count, created_at, updated_at
-      FROM issues
-      WHERE 1=1
-    `;
-    
-    const params: any[] = [];
-    let paramCount = 1;
-
-    if (status) {
-      query += ` AND status = $${paramCount}`;
-      params.push(status);
-      paramCount++;
+    if (status && !["reported", "acknowledged", "in_progress", "resolved"].includes(status)) {
+      return jsonError("Invalid status", 400);
     }
 
-    if (category) {
-      query += ` AND category = $${paramCount}`;
-      params.push(category);
-      paramCount++;
-    }
+    const filters = {
+      status: status as IssueStatus | undefined,
+      category: category as IssueCategory | undefined,
+      limit,
+      offset,
+    };
 
+    let [issues, total] = await Promise.all([
+      listIssues(filters),
+      countIssues([
+        ...(filters.status ? [Query.equal("status", filters.status)] : []),
+        ...(filters.category ? [Query.equal("category", filters.category)] : []),
+      ]),
+    ]);
+
+    // TablesDB has no full-text search; filter the fetched page in process.
     if (search) {
-      query += ` AND (title ILIKE $${paramCount} OR description ILIKE $${paramCount})`;
-      params.push(`%${search}%`);
-      paramCount++;
+      issues = issues.filter(
+        (issue) =>
+          issue.title.toLowerCase().includes(search) ||
+          issue.description.toLowerCase().includes(search)
+      );
     }
 
-    query += ` ORDER BY created_at DESC LIMIT $${paramCount} OFFSET $${paramCount + 1}`;
-    params.push(limit, offset);
-
-    const result = await pgPool.query(query, params);
-
-    return NextResponse.json({
-      success: true,
-      issues: result.rows.map((row) => ({
-        ...row,
-        created_at: row.created_at.toISOString(),
-        updated_at: row.updated_at.toISOString(),
-      })),
-    });
+    return NextResponse.json({ success: true, issues, total });
   } catch (error) {
-    console.error("Admin issues error:", error);
-    return NextResponse.json(
-      { error: "Failed to fetch issues" },
-      { status: 500 }
-    );
+    return handleRouteError("admin:issues", error);
   }
 }

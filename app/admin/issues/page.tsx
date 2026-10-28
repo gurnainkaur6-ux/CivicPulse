@@ -16,6 +16,7 @@ const STATUS_COLORS = {
 export default function AdminIssuesPage() {
   const [issues, setIssues] = useState<Issue[]>([]);
   const [loading, setLoading] = useState(true);
+  const [authError, setAuthError] = useState("");
   const [filter, setFilter] = useState({ status: "", category: "", search: "" });
   const [page, setPage] = useState(0);
   const pageSize = 20;
@@ -38,8 +39,18 @@ export default function AdminIssuesPage() {
       const response = await fetch(`/api/admin/issues?${params}`);
       const data = await response.json();
 
+      if (response.status === 401 || response.status === 403) {
+        setAuthError(
+          "Admin sign-in required. Sign in with an admin account, or add your email to ADMIN_EMAILS."
+        );
+        return;
+      }
+      setAuthError("");
+
       if (data.success) {
         setIssues(data.issues);
+      } else {
+        console.error("Failed to fetch issues:", data.error);
       }
     } catch (err) {
       console.error("Failed to fetch issues:", err);
@@ -56,11 +67,21 @@ export default function AdminIssuesPage() {
         body: JSON.stringify({ status: newStatus }),
       });
 
+      if (response.status === 401 || response.status === 403) {
+        setAuthError("Admin sign-in required to change status.");
+        return;
+      }
+
       if (response.ok) {
-        fetchIssues(); // Refresh list
+        setAuthError("");
+        await fetchIssues(); // Refresh list
+      } else {
+        const data = await response.json().catch(() => ({}));
+        alert(data.error || "Failed to update status");
       }
     } catch (err) {
       console.error("Failed to update status:", err);
+      alert("Failed to update status");
     }
   };
 
@@ -72,11 +93,21 @@ export default function AdminIssuesPage() {
         method: "DELETE",
       });
 
+      if (response.status === 401 || response.status === 403) {
+        setAuthError("Admin sign-in required to delete issues.");
+        return;
+      }
+
       if (response.ok) {
-        fetchIssues(); // Refresh list
+        setAuthError("");
+        await fetchIssues(); // Refresh list
+      } else {
+        const data = await response.json().catch(() => ({}));
+        alert(data.error || "Failed to delete issue");
       }
     } catch (err) {
       console.error("Failed to delete issue:", err);
+      alert("Failed to delete issue");
     }
   };
 
@@ -152,6 +183,11 @@ export default function AdminIssuesPage() {
 
       {/* Issues Table */}
       <main className="container mx-auto px-4 py-8">
+        {authError && (
+          <div className="mb-6 bg-red-50 border border-red-200 text-red-800 px-4 py-3 rounded-lg">
+            {authError}
+          </div>
+        )}
         {loading ? (
           <div className="text-center py-12">Loading...</div>
         ) : issues.length === 0 ? (
