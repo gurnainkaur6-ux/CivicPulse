@@ -11,6 +11,12 @@ Appwrite Auth, and photos live in Appwrite Storage.
 ![Next.js](https://img.shields.io/badge/Next.js-15-000000?style=flat&logo=next.js&logoColor=white)
 ![TypeScript](https://img.shields.io/badge/TypeScript-3178C6?style=flat&logo=typescript&logoColor=white)
 
+## Demo video
+
+[![CivicPulse demo video](https://img.youtube.com/vi/OaSJ52U3QO0/maxresdefault.jpg)](https://youtu.be/OaSJ52U3QO0?si=02GpgLXkHWBHp4m5)
+
+Watch the full demo: [CivicPulse Demo Video](https://youtu.be/OaSJ52U3QO0?si=02GpgLXkHWBHp4m5)
+
 ---
 
 ## What it does
