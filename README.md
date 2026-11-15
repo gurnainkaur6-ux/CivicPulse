@@ -217,7 +217,8 @@ types/index.ts             # domain types
 ```
 
 ---
-
+## Demo 
+https://youtu.be/OaSJ52U3QO0?si=02GpgLXkHWBHp4m5
 ## Notes and limitations
 
 - **Rate limiting** is in-memory (`lib/rate-limit-simple.ts`); on multi-instance hosting swap it
